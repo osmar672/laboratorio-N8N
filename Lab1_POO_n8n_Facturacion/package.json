@@ -1,0 +1,14 @@
+{
+  "name": "lab1-poo-n8n-facturacion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Laboratorio integrador POO + n8n: facturacion con dias habiles y feriados de Costa Rica",
+  "scripts": {
+    "api": "json-server --watch db.json --port 3000",
+    "demo": "node main.js",
+    "test": "node tests/pruebas.js && node tests/workflow-code-smoke.js"
+  },
+  "devDependencies": {
+    "json-server": "^0.17.4"
+  }
+}

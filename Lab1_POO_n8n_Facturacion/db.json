@@ -1,0 +1,49 @@
+{
+  "facturas": [
+    {
+      "id": "F-2026-001",
+      "cliente": "Comercial La Sabana S.A.",
+      "fechaEmision": "2026-09-15",
+      "diasHabiles": 15,
+      "monto": 185000,
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-2026-002",
+      "cliente": "Distribuidora Central Ltda.",
+      "fechaEmision": "2026-10-15",
+      "diasHabiles": 15,
+      "monto": 325500,
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-2026-003",
+      "cliente": "Soluciones del Valle S.R.L.",
+      "fechaEmision": "2026-10-07",
+      "diasHabiles": 3,
+      "monto": 79000,
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-2026-004",
+      "cliente": "Registro incompleto de prueba",
+      "fechaEmision": "2026-10-01",
+      "diasHabiles": 0,
+      "monto": 45000,
+      "estado": "pendiente",
+      "fechaVencimiento": null
+    },
+    {
+      "id": "F-2026-005",
+      "cliente": "Cliente con factura pagada",
+      "fechaEmision": "2026-10-01",
+      "diasHabiles": 15,
+      "monto": 120000,
+      "estado": "pagada",
+      "fechaVencimiento": null
+    }
+  ]
+}

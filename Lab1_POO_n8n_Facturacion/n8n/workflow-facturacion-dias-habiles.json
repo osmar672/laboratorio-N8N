@@ -1,0 +1,284 @@
+{
+  "name": "Laboratorio 1 - Facturacion con dias habiles (POO + n8n)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b074f319-78d1-4a02-ac97-b1dbcc9535ba",
+      "name": "Inicio manual",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        180,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1,
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "8aeb2f7c-0b15-46b1-851b-4a960c4752a2",
+      "name": "Ejecucion diaria",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:3000/facturas",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "3315b393-df80-4210-bec1-e26debc72652",
+      "name": "Obtener facturas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        430,
+        360
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://date.nager.at/api/v3/PublicHolidays/' + $now.year + '/CR' }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "862170d2-e6de-4d8e-8d85-e2b7852085a8",
+      "name": "Consultar feriados del ano actual",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        670,
+        360
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://date.nager.at/api/v3/PublicHolidays/' + $now.plus({ years: 1 }).year + '/CR' }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "4ecacaae-1781-43fd-9121-29dd141e9348",
+      "name": "Consultar feriados del proximo ano",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        360
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Espejo de la logica de src/CalendarioLaboral.js, src/Factura.js y src/CuentaPorCobrar.js.\n// El workflow se exporta autocontenido, por eso las funciones de dominio se copian aqui\n// con el mismo algoritmo; los archivos POO son la version independiente y testeable.\n\nfunction obtenerItems(nombreNodo) {\n  try { return $(nombreNodo).all().map(item => item.json); }\n  catch (error) { return []; }\n}\n\nfunction aLista(valores) {\n  const salida = [];\n  for (const valor of valores) {\n    if (Array.isArray(valor)) salida.push(...valor);\n    else if (Array.isArray(valor?.body)) salida.push(...valor.body);\n    else if (Array.isArray(valor?.data)) salida.push(...valor.data);\n    else if (valor && typeof valor === 'object') salida.push(valor);\n  }\n  return salida;\n}\n\nfunction esErrorHTTP(valor) {\n  return Boolean(valor && typeof valor === 'object' && (\n    valor.error || Number(valor.statusCode) >= 400 ||\n    (typeof valor.message === 'string' && !valor.date && !valor.id && !valor.fechaEmision)\n  ));\n}\n\nfunction esFechaISO(fecha) {\n  if (typeof fecha !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(fecha)) return false;\n  const d = new Date(`${fecha}T12:00:00.000Z`);\n  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === fecha;\n}\n\nfunction hoyCostaRica() {\n  const partes = new Intl.DateTimeFormat('en-CA', {\n    timeZone: 'America/Costa_Rica', year: 'numeric', month: '2-digit', day: '2-digit'\n  }).formatToParts(new Date());\n  const p = Object.fromEntries(partes.map(parte => [parte.type, parte.value]));\n  return `${p.year}-${p.month}-${p.day}`;\n}\n\nfunction esDiaHabil(fechaISO, feriados) {\n  const dia = new Date(`${fechaISO}T12:00:00.000Z`).getUTCDay();\n  return dia !== 0 && dia !== 6 && !feriados.has(fechaISO);\n}\n\nfunction sumarDiasHabiles(fechaEmision, cantidad, feriados) {\n  const fecha = new Date(`${fechaEmision}T12:00:00.000Z`);\n  let contados = 0;\n  let intentos = 0;\n  while (contados < cantidad) {\n    fecha.setUTCDate(fecha.getUTCDate() + 1);\n    const actual = fecha.toISOString().slice(0, 10);\n    if (esDiaHabil(actual, feriados)) contados += 1;\n    intentos += 1;\n    if (intentos > 550) throw new Error('Limite de calculo de dias habiles excedido.');\n  }\n  return fecha.toISOString().slice(0, 10);\n}\n\nconst fechaActual = hoyCostaRica();\nconst respuestaFacturasRaw = obtenerItems('Obtener facturas');\nconst facturas = aLista(respuestaFacturasRaw);\n\nif (facturas.length === 0 || respuestaFacturasRaw.some(esErrorHTTP) || facturas.some(esErrorHTTP)) {\n  return [{ json: {\n    accion: 'ERROR_JSON_SERVER', id: null,\n    motivo: 'No se pudo leer la lista de facturas desde JSON Server o la respuesta esta vacia. No se modifico ningun registro.',\n    fechaEvaluacion: fechaActual\n  }}];\n}\n\nconst feriadosActualRaw = obtenerItems('Consultar feriados del ano actual');\nconst feriadosProximoRaw = obtenerItems('Consultar feriados del proximo ano');\nconst feriadosActual = aLista(feriadosActualRaw);\nconst feriadosProximo = aLista(feriadosProximoRaw);\nconst respuestasFeriadosValidas = [\n  { nombre: 'ano actual', raw: feriadosActualRaw, lista: feriadosActual },\n  { nombre: 'ano proximo', raw: feriadosProximoRaw, lista: feriadosProximo }\n];\nconst feriadoInvalido = respuestasFeriadosValidas.find(respuesta =>\n  respuesta.raw.length === 0 || respuesta.raw.some(esErrorHTTP) ||\n  respuesta.lista.length === 0 || !respuesta.lista.every(item => typeof item?.date === 'string' && esFechaISO(item.date))\n);\n\nif (feriadoInvalido) {\n  return [{ json: {\n    accion: 'ERROR_API_FERIADOS', id: null,\n    motivo: `La API de feriados no devolvio datos validos para el ${feriadoInvalido.nombre}. Por seguridad no se recalcularon ni actualizaron facturas.`,\n    fechaEvaluacion: fechaActual\n  }}];\n}\n\nconst feriados = new Set([...feriadosActual, ...feriadosProximo].map(item => item.date));\n\nfunction evaluarFactura(factura) {\n  if (!factura || typeof factura !== 'object') {\n    return { accion: 'ERROR_DATOS', id: null, motivo: 'El registro de factura no es un objeto valido.' };\n  }\n  if (typeof factura.estado !== 'string' || factura.estado.trim() === '') {\n    return { accion: 'ERROR_DATOS', id: factura.id ?? null, motivo: 'estado es obligatorio', noActualizar: true };\n  }\n  if (factura.estado !== 'pendiente') {\n    return { accion: 'IGNORAR', id: factura.id ?? null, motivo: `Estado actual: ${factura.estado}. Solo se procesan facturas pendientes.` };\n  }\n\n  const errores = [];\n  if (factura.id === undefined || factura.id === null || String(factura.id).trim() === '') errores.push('falta el identificador de factura');\n  if (!esFechaISO(factura.fechaEmision)) errores.push('fechaEmision debe tener formato AAAA-MM-DD');\n  if (!Number.isInteger(factura.diasHabiles) || factura.diasHabiles < 1 || factura.diasHabiles > 365) errores.push('diasHabiles debe ser un entero entre 1 y 365');\n  if (typeof factura.monto !== 'number' || !Number.isFinite(factura.monto) || factura.monto <= 0) errores.push('monto debe ser un numero mayor que cero');\n  if (typeof factura.estado !== 'string' || factura.estado.trim() === '') errores.push('estado es obligatorio');\n  if (errores.length) {\n    return { accion: 'ERROR_DATOS', id: factura.id ?? null, motivo: errores.join('; '), noActualizar: true };\n  }\n\n  const fechaVencimiento = sumarDiasHabiles(factura.fechaEmision, factura.diasHabiles, feriados);\n  const vencida = fechaActual > fechaVencimiento;\n  const estadoCalculado = vencida ? 'vencida' : 'pendiente';\n  const diasAtraso = vencida\n    ? Math.floor((new Date(`${fechaActual}T12:00:00.000Z`) - new Date(`${fechaVencimiento}T12:00:00.000Z`)) / 86400000)\n    : 0;\n  const requiereCambio = factura.fechaVencimiento !== fechaVencimiento || factura.estado !== estadoCalculado;\n\n  if (!requiereCambio) {\n    return { accion: 'SIN_CAMBIOS', id: factura.id, fechaVencimientoCalculada: fechaVencimiento, estadoCalculado, diasAtraso, motivo: 'La factura ya tiene los datos calculados.' };\n  }\n\n  return {\n    accion: 'ACTUALIZAR', id: factura.id, fechaVencimientoCalculada: fechaVencimiento,\n    estadoCalculado, diasAtraso,\n    motivo: vencida ? 'El plazo de pago ya vencio.' : 'Se calculo la fecha de vencimiento.',\n    actualizacion: {\n      fechaVencimiento, estado: estadoCalculado, diasAtraso, ultimaRevision: fechaActual,\n      observacion: vencida ? `Factura vencida; atraso de ${diasAtraso} dia(s).` : 'Factura dentro del plazo de pago.'\n    }\n  };\n}\n\nreturn facturas.map(factura => ({ json: evaluarFactura(factura) }));\n"
+      },
+      "id": "85e6e184-17d9-4928-8b57-204493106ea1",
+      "name": "Aplicar reglas POO y evaluar facturas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1190,
+        360
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "51ca27fc-685c-4d41-832e-aeeddde63e50",
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "ACTUALIZAR",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9ea5f8b3-bff7-4982-8df9-00db008e00e7",
+      "name": "IF - requiere actualizacion",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1450,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'http://localhost:3000/facturas/' + encodeURIComponent($json.id) }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.actualizacion }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "c6182ee4-ab3b-465e-b43d-ba694a8649db",
+      "name": "Actualizar factura en JSON Server",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1710,
+        280
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "4641e42e-2d09-4222-a28d-26c7b283a77c",
+      "name": "Mostrar errores y registros sin cambios",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1710,
+        460
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Inicio manual": {
+      "main": [
+        [
+          {
+            "node": "Obtener facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecucion diaria": {
+      "main": [
+        [
+          {
+            "node": "Obtener facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener facturas": {
+      "main": [
+        [
+          {
+            "node": "Consultar feriados del ano actual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar feriados del ano actual": {
+      "main": [
+        [
+          {
+            "node": "Consultar feriados del proximo ano",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar feriados del proximo ano": {
+      "main": [
+        [
+          {
+            "node": "Aplicar reglas POO y evaluar facturas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aplicar reglas POO y evaluar facturas": {
+      "main": [
+        [
+          {
+            "node": "IF - requiere actualizacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - requiere actualizacion": {
+      "main": [
+        [
+          {
+            "node": "Actualizar factura en JSON Server",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mostrar errores y registros sin cambios",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Costa_Rica",
+    "saveManualExecutions": true
+  },
+  "versionId": "e3d3ebae-ac14-4d91-90db-4c62e790c687",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}
